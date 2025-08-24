@@ -17,6 +17,7 @@ const roomStates = new Map<string, { waitingFor: string; listName?: string }>();
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
+  console.log("Received webhook:", JSON.stringify(JSON.parse(body), null, 2));
 
   // 署名検証
   const signature = req.headers.get("x-line-signature") || "";
@@ -25,13 +26,18 @@ export async function POST(req: NextRequest) {
     .update(body)
     .digest("base64");
 
-  if (signature !== `sha256=${hash}`) {
+  console.log("Signature verification:", { signature, hash });
+
+  if (signature !== hash) {
+    console.log("Signature verification failed");
     return new NextResponse("Invalid signature", { status: 401 });
   }
 
   const events = JSON.parse(body).events;
 
   for (const event of events) {
+    console.log("Processing event:", event);
+
     if (event.type === "message" && event.message.type === "text") {
       const replyToken = event.replyToken;
       const userMessage = event.message.text.trim();
@@ -40,13 +46,20 @@ export async function POST(req: NextRequest) {
       const roomId =
         event.source.groupId || event.source.roomId || event.source.userId;
 
+      console.log("Room ID:", roomId, "Message:", userMessage);
+
       let replyText = await processMessage(roomId, userMessage);
 
+      console.log("Reply text:", replyText);
+
       // 空の返信の場合はスキップ
-      if (!replyText) continue;
+      if (!replyText) {
+        console.log("Empty reply, skipping");
+        continue;
+      }
 
       // LINEに返信
-      await fetch("https://api.line.me/v2/bot/message/reply", {
+      const response = await fetch("https://api.line.me/v2/bot/message/reply", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -57,6 +70,8 @@ export async function POST(req: NextRequest) {
           messages: [{ type: "text", text: replyText }],
         }),
       });
+
+      console.log("LINE API response:", response.status, await response.text());
     }
   }
 
