@@ -13,7 +13,7 @@ const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET!;
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!;
 
 // ユーザーの状態を管理（本来はRedisやDBに保存すべき）
-const roomStates = new Map<string, { waitingFor: string; listName?: string }>();
+const userStates = new Map<string, { waitingFor: string; listName?: string }>();
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     .update(body)
     .digest("base64");
 
-  if (signature !== hash) {
+  if (signature !== `sha256=${hash}`) {
     return new NextResponse("Invalid signature", { status: 401 });
   }
 
