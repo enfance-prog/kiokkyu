@@ -22,6 +22,10 @@ export default function Home() {
               <code>おぼえるくん [リスト名] 削除</code> - リストを削除
             </li>
             <li>
+              <code>おぼえるくん [リスト名] [アイテム名] 削除</code> -
+              1つのアイテムを削除
+            </li>
+            <li>
               <code>おぼえるくん 一覧</code> - リスト一覧を表示
             </li>
             <li>
