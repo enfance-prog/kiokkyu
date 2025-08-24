@@ -6,13 +6,14 @@ import {
   addItemsToList,
   getListWithItems,
   deleteList,
+  deleteItemFromList,
 } from "@/lib/db";
 
 const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET!;
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!;
 
 // ユーザーの状態を管理（本来はRedisやDBに保存すべき）
-const userStates = new Map<string, { waitingFor: string; listName?: string }>();
+const roomStates = new Map<string, { waitingFor: string; listName?: string }>();
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -34,10 +35,15 @@ export async function POST(req: NextRequest) {
     if (event.type === "message" && event.message.type === "text") {
       const replyToken = event.replyToken;
       const userMessage = event.message.text.trim();
-      const userId =
-        event.source.userId || event.source.groupId || event.source.roomId;
 
-      let replyText = await processMessage(userId, userMessage);
+      // ルーム識別：グループ > ルーム > ユーザーの順で優先
+      const roomId =
+        event.source.groupId || event.source.roomId || event.source.userId;
+
+      let replyText = await processMessage(roomId, userMessage);
+
+      // 空の返信の場合はスキップ
+      if (!replyText) continue;
 
       // LINEに返信
       await fetch("https://api.line.me/v2/bot/message/reply", {
