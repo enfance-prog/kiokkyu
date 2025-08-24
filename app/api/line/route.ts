@@ -12,8 +12,8 @@ import {
 const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET!;
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!;
 
-// ユーザーの状態を管理（本来はRedisやDBに保存すべき）
-const userStates = new Map<string, { waitingFor: string; listName?: string }>();
+// ルーム（グループ/個人チャット）の状態を管理（本来はRedisやDBに保存すべき）
+const roomStates = new Map<string, { waitingFor: string; listName?: string }>();
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -64,37 +64,39 @@ export async function POST(req: NextRequest) {
 }
 
 async function processMessage(
-  userId: string,
+  roomId: string,
   message: string
 ): Promise<string> {
-  // ユーザーが入力待ち状態かチェック
-  const userState = userStates.get(userId);
+  // ルームが入力待ち状態かチェック
+  const roomState = roomStates.get(roomId);
 
-  if (userState?.waitingFor === "items") {
+  if (roomState?.waitingFor === "items") {
     // アイテム追加の入力待ち状態
     const items = message.split("\n").filter((item) => item.trim());
 
     if (items.length === 0) {
-      userStates.delete(userId);
-      return "アイテムが入力されなかったよ。もう一度やり直してね！";
+      roomStates.delete(roomId);
+      return "おや？アイテムが入力されなかったみたい🤔\nもう一度「おぼえるくん [リスト名] 追加」でやり直してね！";
     }
 
     try {
-      const list = await getListWithItems(userId, userState.listName!);
+      const list = await getListWithItems(roomId, roomState.listName!);
       if (list) {
-        await addItemsToList(list.id, items);
-        userStates.delete(userId);
+        const addedItems = await addItemsToList(list.id, items);
+        roomStates.delete(roomId);
 
-        const itemList = items.map((item) => `・${item}`).join("\n");
-        return `${userState.listName}に追加したよ！\n\n${itemList}`;
+        const itemList = addedItems
+          .map((item) => `・${item.item_text}`)
+          .join("\n");
+        return `やったね！${roomState.listName}に追加完了だよ✨\n\n【追加されたアイテム】\n${itemList}\n\n「おぼえるくん ${roomState.listName}」で全部の中身も確認できるよ！`;
       } else {
-        userStates.delete(userId);
-        return "リストが見つからなかったよ。もう一度試してみて！";
+        roomStates.delete(roomId);
+        return "あれ？リストが見つからなかった😅\nもう一度試してみてね！";
       }
     } catch (error) {
       console.error("Database error:", error);
-      userStates.delete(userId);
-      return "エラーが発生したよ。もう一度試してみて！";
+      roomStates.delete(roomId);
+      return "ごめん！何かエラーが起きちゃった😵\nもう一度試してみてくれる？";
     }
   }
 
@@ -107,36 +109,41 @@ async function processMessage(
 
   // 「おぼえるくん」のみの場合
   if (parts.length === 1) {
-    return `やあ！おぼえるくんだよ！リスト管理が得意だよ✨
+    return `やっほー！おぼえるくんだよ〜🤖
+リスト管理のお手伝いをするから任せて！✨
 
-使い方：
-・おぼえるくん [リスト名] 追加
-・おぼえるくん [リスト名] 削除  
-・おぼえるくん [リスト名] （中身を表示）
-・おぼえるくん 一覧
-・おぼえるくん bye（退出）
+【基本の使い方】
+• おぼえるくん [リスト名] 追加 → アイテムを追加
+• おぼえるくん [リスト名] → リストの中身を表示  
+• おぼえるくん [リスト名] 削除 → リスト全体を削除
+• おぼえるくん [リスト名] [アイテム名] 削除 → 1つのアイテムを削除
+• おぼえるくん 一覧 → 全リスト一覧
+• おぼえるくん bye → 退室（寂しいけど...😢）
 
-例：「おぼえるくん 買い物リスト 追加」`;
+【例】「おぼえるくん 買い物リスト 追加」
+→ 何を追加するか聞くから改行で区切って送ってね！
+
+困ったときはいつでも「おぼえるくん」って呼んでね😊`;
   }
 
   // 「おぼえるくん bye」の場合
   if (parts.length === 2 && parts[1] === "bye") {
-    return "またね！おぼえるくんを呼んでくれてありがとう 👋";
+    return "さようなら〜👋 また呼んでくれたら嬉しいな！\nおぼえるくんはいつでも君のリスト管理を待ってるよ✨";
   }
 
   // 「おぼえるくん 一覧」の場合
   if (parts.length === 2 && parts[1] === "一覧") {
     try {
-      const lists = await getLists(userId);
+      const lists = await getLists(roomId);
       if (lists.length === 0) {
-        return "まだリストがないよ！\n「おぼえるくん [リスト名] 追加」でリストを作ってみて！";
+        return "まだリストがないみたい📝\n「おぼえるくん [リスト名] 追加」でリストを作ってみよう！\n\n例：おぼえるくん 買い物リスト 追加";
       }
 
       const listNames = lists.map((list) => `・${list.list_name}`).join("\n");
-      return `今あるリストはこれだよ📝\n\n${listNames}`;
+      return `現在のリスト一覧だよ〜📋\n\n${listNames}\n\n各リストの中身を見たいときは「おぼえるくん [リスト名]」って送ってね！`;
     } catch (error) {
       console.error("Database error:", error);
-      return "エラーが発生したよ。もう一度試してみて！";
+      return "あら？リスト一覧の取得でエラーが発生しちゃった😅\nもう一度試してみて！";
     }
   }
 
@@ -144,51 +151,85 @@ async function processMessage(
   if (parts.length === 2) {
     const listName = parts[1];
     try {
-      const list = await getListWithItems(userId, listName);
+      const list = await getListWithItems(roomId, listName);
       if (!list || !list.items || list.items.length === 0) {
-        return `${listName}はまだ空っぽだよ！\n「おぼえるくん ${listName} 追加」でアイテムを入れてみて！`;
+        return `「${listName}」はまだ空っぽだよ〜📝\n「おぼえるくん ${listName} 追加」でアイテムを入れてみよう！`;
       }
 
       const itemList = list.items
         .map((item) => `・${item.item_text}`)
         .join("\n");
-      return `【${listName}】\n\n${itemList}`;
+      return `【${listName}】の中身だよ✨\n\n${itemList}\n\n何か追加するなら「おぼえるくん ${listName} 追加」\n特定のアイテムを消すなら「おぼえるくん ${listName} [アイテム名] 削除」だよ！`;
     } catch (error) {
       console.error("Database error:", error);
-      return "エラーが発生したよ。もう一度試してみて！";
+      return "リストの取得でエラーが発生しちゃった😅\nもう一度試してみて！";
     }
   }
 
-  // 「おぼえるくん [リスト名] [操作]」の場合
+  // 「おぼえるくん [リスト名] [操作]」または「おぼえるくん [リスト名] [アイテム名] 削除」の場合
   if (parts.length >= 3) {
     const listName = parts[1];
-    const action = parts[2];
 
-    if (action === "追加") {
-      try {
-        await createList(userId, listName);
-        userStates.set(userId, { waitingFor: "items", listName });
-        return `${listName}に追加したい内容を教えてね！\n改行で区切って複数入力できるよ 📝`;
-      } catch (error) {
-        console.error("Database error:", error);
-        return "エラーが発生したよ。もう一度試してみて！";
-      }
-    }
+    // 4つ以上の場合は「アイテム削除」の可能性をチェック
+    if (parts.length >= 4 && parts[parts.length - 1] === "削除") {
+      // 「おぼえるくん [リスト名] [アイテム名...] 削除」
+      const itemName = parts.slice(2, -1).join(" "); // 最後の「削除」を除いてアイテム名を結合
 
-    if (action === "削除") {
       try {
-        const deleted = await deleteList(userId, listName);
+        const deleted = await deleteItemFromList(roomId, listName, itemName);
         if (deleted) {
-          return `${listName}を削除したよ 🗑️`;
+          const updatedList = await getListWithItems(roomId, listName);
+          if (
+            updatedList &&
+            updatedList.items &&
+            updatedList.items.length > 0
+          ) {
+            const itemList = updatedList.items
+              .map((item) => `・${item.item_text}`)
+              .join("\n");
+            return `よし！「${itemName}」を削除したよ🗑️\n\n【${listName}】の最新の中身：\n${itemList}`;
+          } else {
+            return `「${itemName}」を削除したら、${listName}が空になっちゃった😅\n新しいアイテムを追加するなら「おぼえるくん ${listName} 追加」だよ！`;
+          }
         } else {
-          return `${listName}が見つからなかったよ。「おぼえるくん 一覧」で確認してみて！`;
+          return `あれ？「${itemName}」が${listName}に見つからなかった🤔\n「おぼえるくん ${listName}」で中身を確認してみて！`;
         }
       } catch (error) {
         console.error("Database error:", error);
-        return "エラーが発生したよ。もう一度試してみて！";
+        return "アイテム削除でエラーが発生しちゃった😅\nもう一度試してみて！";
+      }
+    }
+
+    // 通常の操作（3つの場合）
+    if (parts.length === 3) {
+      const action = parts[2];
+
+      if (action === "追加") {
+        try {
+          await createList(roomId, listName);
+          roomStates.set(roomId, { waitingFor: "items", listName });
+          return `${listName}に追加したいものを教えてね〜📝\n改行で区切って複数のアイテムを一度に追加できるよ！\n\n例：\nネギ\nキャベツ\nひき肉`;
+        } catch (error) {
+          console.error("Database error:", error);
+          return "リスト作成でエラーが発生しちゃった😅\nもう一度試してみて！";
+        }
+      }
+
+      if (action === "削除") {
+        try {
+          const deleted = await deleteList(roomId, listName);
+          if (deleted) {
+            return `「${listName}」を完全に削除したよ🗑️\nまた新しいリストが必要になったらいつでも作ってね！`;
+          } else {
+            return `あれ？「${listName}」が見つからなかった🤔\n「おぼえるくん 一覧」で確認してみて！`;
+          }
+        } catch (error) {
+          console.error("Database error:", error);
+          return "リスト削除でエラーが発生しちゃった😅\nもう一度試してみて！";
+        }
       }
     }
   }
 
-  return "うーん、よくわからなかった！\n「おぼえるくん」だけ送ると使い方を教えるよ 😊";
+  return "うーん、ちょっとよくわからなかった😅\n「おぼえるくん」だけ送ると使い方を詳しく教えるよ〜📚";
 }
