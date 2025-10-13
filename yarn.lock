@@ -571,6 +571,11 @@ next@15.5.0:
     "@next/swc-win32-x64-msvc" "15.5.0"
     sharp "^0.34.3"
 
+node-cron@^4.2.1:
+  version "4.2.1"
+  resolved "https://registry.npmjs.org/node-cron/-/node-cron-4.2.1.tgz"
+  integrity sha512-lgimEHPE/QDgFlywTd8yTR61ptugX3Qer29efeyWw2rv259HtGBNn1vZVmp8lB9uo9wC0t/AT4iGqXxia+CJFg==
+
 pg-cloudflare@^1.2.7:
   version "1.2.7"
   resolved "https://registry.npmjs.org/pg-cloudflare/-/pg-cloudflare-1.2.7.tgz"
