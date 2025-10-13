@@ -1,0 +1,17 @@
+name: Reminder Cron Job
+
+on:
+  schedule:
+    # 毎分実行（UTCタイム）
+    - cron: "* * * * *"
+  workflow_dispatch: # 手動実行も可能
+
+jobs:
+  trigger-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel Cron Endpoint
+        run: |
+          curl -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://your-domain.vercel.app/api/cron
