@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel Cron Endpoint
+        # Note: CRON_SECRET must be configured in GitHub repository secrets
+        # Go to: Settings > Secrets and variables > Actions > New repository secret
+        # Name: CRON_SECRET, Value: czeo0MNtsWlg40HXQcori40uER2AsW10IW8FqIdgHIA=
         run: |
           curl -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
