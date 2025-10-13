@@ -74,35 +74,123 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Postbackイベント処理（スヌーズボタン）
+    // Postbackイベント処理（ボタン操作）
     if (event.type === "postback") {
       const replyToken = event.replyToken;
       const data = new URLSearchParams(event.postback.data);
       const action = data.get("action");
-      const reminderId = parseInt(data.get("reminder_id") || "0");
+      const roomId =
+        event.source.groupId || event.source.roomId || event.source.userId;
 
-      let replyText = "";
+      let replyMessages: any[] = [];
 
+      // スヌーズ・完了処理
       if (action === "snooze") {
+        const reminderId = parseInt(data.get("reminder_id") || "0");
         const minutes = parseInt(data.get("minutes") || "10");
         try {
           await snoozeReminder(reminderId, minutes);
-          replyText = `⏰ ${minutes}分後にまたリマインドするね！`;
+          replyMessages = [
+            { type: "text", text: `⏰ ${minutes}分後にまたリマインドするね！` },
+          ];
         } catch (error) {
           console.error("Snooze error:", error);
-          replyText = "スヌーズの設定でエラーが発生しちゃった😅";
+          replyMessages = [
+            { type: "text", text: "スヌーズの設定でエラーが発生しちゃった😅" },
+          ];
         }
       } else if (action === "complete") {
+        const reminderId = parseInt(data.get("reminder_id") || "0");
         try {
           await completeReminder(reminderId);
-          replyText = "✅ リマインダーを完了にしたよ！お疲れさま 🎉";
+          replyMessages = [
+            {
+              type: "text",
+              text: "✅ リマインダーを完了にしたよ！お疲れさま 🎉",
+            },
+          ];
         } catch (error) {
           console.error("Complete error:", error);
-          replyText = "完了処理でエラーが発生しちゃった😅";
+          replyMessages = [
+            { type: "text", text: "完了処理でエラーが発生しちゃった😅" },
+          ];
+        }
+      }
+      // リスト表示
+      else if (action === "show_list") {
+        const listName = data.get("list_name") || "";
+        replyMessages = await showListDetails(roomId, listName);
+      }
+      // リスト追加
+      else if (action === "add_to_list") {
+        const listName = data.get("list_name") || "";
+        roomStates.set(roomId, { waitingFor: "items", listName });
+        replyMessages = [
+          {
+            type: "text",
+            text: `【${listName}】に追加したいものを教えてね～📝\n改行で区切って複数のアイテムを一度に追加できるよ！\n\n例：\nネギ\nキャベツ\nひき肉`,
+          },
+        ];
+      }
+      // リスト削除
+      else if (action === "delete_list") {
+        const listName = data.get("list_name") || "";
+        try {
+          const deleted = await deleteList(roomId, listName);
+          if (deleted) {
+            replyMessages = [
+              {
+                type: "text",
+                text: `【${listName}】を完全に削除したよ🗑️\nまた新しいリストが必要になったらいつでも作ってね！`,
+              },
+            ];
+          } else {
+            replyMessages = [
+              {
+                type: "text",
+                text: `あれ？【${listName}】が見つからなかった🤔`,
+              },
+            ];
+          }
+        } catch (error) {
+          replyMessages = [
+            { type: "text", text: "削除でエラーが発生しちゃった😅" },
+          ];
+        }
+      }
+      // リマインダー表示
+      else if (action === "show_reminder") {
+        const reminderName = data.get("reminder_name") || "";
+        replyMessages = await showReminderDetails(roomId, reminderName);
+      }
+      // リマインダー削除
+      else if (action === "delete_reminder") {
+        const reminderName = data.get("reminder_name") || "";
+        try {
+          const deleted = await deleteReminder(roomId, reminderName);
+          if (deleted) {
+            replyMessages = [
+              {
+                type: "text",
+                text: `【${reminderName}】のリマインダーを削除したよ🗑️`,
+              },
+            ];
+          } else {
+            replyMessages = [
+              {
+                type: "text",
+                text: `【${reminderName}】のリマインダーが見つからなかった🤔`,
+              },
+            ];
+          }
+        } catch (error) {
+          replyMessages = [
+            { type: "text", text: "削除でエラーが発生しちゃった😅" },
+          ];
         }
       }
 
-      if (replyText) {
+      if (replyMessages.length > 0) {
         await fetch("https://api.line.me/v2/bot/message/reply", {
           method: "POST",
           headers: {
@@ -111,7 +199,7 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             replyToken: replyToken,
-            messages: [{ type: "text", text: replyText }],
+            messages: replyMessages,
           }),
         });
       }
@@ -146,12 +234,12 @@ async function processMessage(roomId: string, message: string): Promise<any[]> {
         roomStates.delete(roomId);
 
         const itemList = addedItems
-          .map((item) => `・${item.item_text}`)
+          .map((item) => `  ・${item.item_text}`)
           .join("\n");
         return [
           {
             type: "text",
-            text: `やったね！**【${roomState.listName}】**に追加完了だよ✨\n\n**追加されたアイテム**\n${itemList}\n\n「おぼえるくん ${roomState.listName}」で全部の中身も確認できるよ！`,
+            text: `やったね！【${roomState.listName}】に追加完了だよ✨\n\n＜追加されたアイテム＞\n${itemList}\n\n「おぼえるくん ${roomState.listName}」で全部の中身も確認できるよ！`,
           },
         ];
       } else {
@@ -210,7 +298,7 @@ async function processListCommand(
     return [
       {
         type: "text",
-        text: "さようなら〜👋 また呼んでくれたら嬉しいな！\nおぼえるくんはいつでも君のリスト管理を待ってるよ✨",
+        text: "さようなら～👋 また呼んでくれたら嬉しいな！\nおぼえるくんはいつでも君のリスト管理を待ってるよ✨",
       },
     ];
   }
@@ -228,11 +316,34 @@ async function processListCommand(
         ];
       }
 
-      const listNames = lists.map((list) => `・${list.list_name}`).join("\n");
+      // リスト一覧をボタン付きで表示
+      let text = "━━━━━━━━━━━━━━\n";
+      text += "📋 登録中のリスト一覧\n";
+      text += "━━━━━━━━━━━━━━\n\n";
+      text += "下のボタンから確認したいリストを選んでね！\n\n";
+      lists.forEach((list, index) => {
+        text += `${index + 1}. ${list.list_name}\n`;
+      });
+
+      const quickReply = {
+        items: lists.slice(0, 13).map((list) => ({
+          type: "action",
+          action: {
+            type: "postback",
+            label: list.list_name,
+            data: `action=show_list&list_name=${encodeURIComponent(
+              list.list_name
+            )}`,
+            displayText: `おぼえるくん ${list.list_name}`,
+          },
+        })),
+      };
+
       return [
         {
           type: "text",
-          text: `**現在のリスト一覧** 📋\n\n${listNames}\n\n各リストの中身を見たいときは「おぼえるくん [リスト名]」って送ってね！`,
+          text: text,
+          quickReply: quickReply,
         },
       ];
     } catch (error) {
@@ -249,35 +360,7 @@ async function processListCommand(
   // 「おぼえるくん [リスト名]」
   if (parts.length === 2) {
     const listName = parts[1];
-    try {
-      const list = await getListWithItems(roomId, listName);
-      if (!list || !list.items || list.items.length === 0) {
-        return [
-          {
-            type: "text",
-            text: `「${listName}」はまだ空っぽだよ〜📝\n「おぼえるくん ${listName} 追加」でアイテムを入れてみよう！`,
-          },
-        ];
-      }
-
-      const itemList = list.items
-        .map((item) => `・${item.item_text}`)
-        .join("\n");
-      return [
-        {
-          type: "text",
-          text: `**【${listName}】の中身** ✨\n\n${itemList}\n\n何か追加するなら「おぼえるくん ${listName} 追加」\n特定のアイテムを消すなら「おぼえるくん ${listName} [アイテム名] 削除」だよ！`,
-        },
-      ];
-    } catch (error) {
-      console.error("Database error:", error);
-      return [
-        {
-          type: "text",
-          text: "リストの取得でエラーが発生しちゃった😅\nもう一度試してみて！",
-        },
-      ];
-    }
+    return await showListDetails(roomId, listName);
   }
 
   // アイテム削除：「おぼえるくん [リスト名] [アイテム名] 削除」
@@ -291,19 +374,19 @@ async function processListCommand(
         const updatedList = await getListWithItems(roomId, listName);
         if (updatedList && updatedList.items && updatedList.items.length > 0) {
           const itemList = updatedList.items
-            .map((item) => `・${item.item_text}`)
+            .map((item) => `  ・${item.item_text}`)
             .join("\n");
           return [
             {
               type: "text",
-              text: `よし！「${itemName}」を削除したよ🗑️\n\n**【${listName}】の最新の中身**\n${itemList}`,
+              text: `よし！「${itemName}」を削除したよ🗑️\n\n【${listName}】の最新の中身\n${itemList}`,
             },
           ];
         } else {
           return [
             {
               type: "text",
-              text: `「${itemName}」を削除したら、**【${listName}】**が空になっちゃった😅\n新しいアイテムを追加するなら「おぼえるくん ${listName} 追加」だよ！`,
+              text: `「${itemName}」を削除したら、【${listName}】が空になっちゃった😅\n新しいアイテムを追加するなら「おぼえるくん ${listName} 追加」だよ！`,
             },
           ];
         }
@@ -311,7 +394,7 @@ async function processListCommand(
         return [
           {
             type: "text",
-            text: `あれ？「${itemName}」が**【${listName}】**に見つからなかった🤔\n「おぼえるくん ${listName}」で中身を確認してみて！`,
+            text: `あれ？「${itemName}」が【${listName}】に見つからなかった🤔\n「おぼえるくん ${listName}」で中身を確認してみて！`,
           },
         ];
       }
@@ -338,7 +421,7 @@ async function processListCommand(
         return [
           {
             type: "text",
-            text: `**【${listName}】**に追加したいものを教えてね〜📝\n改行で区切って複数のアイテムを一度に追加できるよ！\n\n例：\nネギ\nキャベツ\nひき肉`,
+            text: `【${listName}】に追加したいものを教えてね～📝\n改行で区切って複数のアイテムを一度に追加できるよ！\n\n例：\nネギ\nキャベツ\nひき肉`,
           },
         ];
       } catch (error) {
@@ -359,14 +442,14 @@ async function processListCommand(
           return [
             {
               type: "text",
-              text: `「${listName}」を完全に削除したよ🗑️\nまた新しいリストが必要になったらいつでも作ってね！`,
+              text: `【${listName}】を完全に削除したよ🗑️\nまた新しいリストが必要になったらいつでも作ってね！`,
             },
           ];
         } else {
           return [
             {
               type: "text",
-              text: `あれ？「${listName}」が見つからなかった🤔\n「おぼえるくん 一覧」で確認してみて！`,
+              text: `あれ？【${listName}】が見つからなかった🤔\n「おぼえるくん 一覧」で確認してみて！`,
             },
           ];
         }
@@ -385,9 +468,88 @@ async function processListCommand(
   return [
     {
       type: "text",
-      text: "うーん、ちょっとよくわからなかった😅\n「おぼえるくん」だけ送ると使い方を詳しく教えるよ〜📚",
+      text: "うーん、ちょっとよくわからなかった😅\n「おぼえるくん」だけ送ると使い方を詳しく教えるよ～📚",
     },
   ];
+}
+
+// リスト詳細表示（ボタン付き）
+async function showListDetails(
+  roomId: string,
+  listName: string
+): Promise<any[]> {
+  try {
+    const list = await getListWithItems(roomId, listName);
+    if (!list || !list.items || list.items.length === 0) {
+      return [
+        {
+          type: "text",
+          text: `【${listName}】はまだ空っぽだよ～📝\n「おぼえるくん ${listName} 追加」でアイテムを入れてみよう！`,
+        },
+      ];
+    }
+
+    let text = "━━━━━━━━━━━━━━\n";
+    text += `📝 【${listName}】の中身\n`;
+    text += "━━━━━━━━━━━━━━\n\n";
+
+    list.items.forEach((item, index) => {
+      text += `  ${index + 1}. ${item.item_text}\n`;
+    });
+
+    text += "\n次のアクションを選んでね！";
+
+    const quickReply = {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "postback",
+            label: "➕ 追加",
+            data: `action=add_to_list&list_name=${encodeURIComponent(
+              listName
+            )}`,
+            displayText: `おぼえるくん ${listName} 追加`,
+          },
+        },
+        {
+          type: "action",
+          action: {
+            type: "postback",
+            label: "🗑️ リスト削除",
+            data: `action=delete_list&list_name=${encodeURIComponent(
+              listName
+            )}`,
+            displayText: `おぼえるくん ${listName} 削除`,
+          },
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📋 一覧に戻る",
+            text: "おぼえるくん 一覧",
+          },
+        },
+      ],
+    };
+
+    return [
+      {
+        type: "text",
+        text: text,
+        quickReply: quickReply,
+      },
+    ];
+  } catch (error) {
+    console.error("Database error:", error);
+    return [
+      {
+        type: "text",
+        text: "リストの取得でエラーが発生しちゃった😅\nもう一度試してみて！",
+      },
+    ];
+  }
 }
 
 // リマインダーコマンド処理
@@ -415,8 +577,12 @@ async function processReminderCommand(
         ];
       }
 
-      let text = "**登録中のリマインダー** ⏰\n\n";
-      for (const reminder of reminders) {
+      let text = "━━━━━━━━━━━━━━\n";
+      text += "⏰ 登録中のリマインダー\n";
+      text += "━━━━━━━━━━━━━━\n\n";
+      text += "下のボタンから確認したいリマインダーを選んでね！\n\n";
+
+      reminders.forEach((reminder, index) => {
         const priority =
           reminder.priority === "high"
             ? "🔴"
@@ -431,13 +597,33 @@ async function processReminderCommand(
             : reminder.repeat_pattern === "monthly"
             ? "🔄毎月"
             : "";
-        text += `${priority} **${reminder.reminder_name}**\n`;
+        text += `${index + 1}. ${priority} ${reminder.reminder_name}\n`;
         text += `   ${formatDateTime(
           new Date(reminder.remind_at)
         )} (${getRelativeTime(new Date(reminder.remind_at))}) ${repeat}\n\n`;
-      }
+      });
 
-      return [{ type: "text", text }];
+      const quickReply = {
+        items: reminders.slice(0, 13).map((reminder) => ({
+          type: "action",
+          action: {
+            type: "postback",
+            label: reminder.reminder_name.substring(0, 20),
+            data: `action=show_reminder&reminder_name=${encodeURIComponent(
+              reminder.reminder_name
+            )}`,
+            displayText: `おしえてくん ${reminder.reminder_name}`,
+          },
+        })),
+      };
+
+      return [
+        {
+          type: "text",
+          text: text,
+          quickReply: quickReply,
+        },
+      ];
     } catch (error) {
       console.error("Database error:", error);
       return [
@@ -459,11 +645,14 @@ async function processReminderCommand(
         ];
       }
 
-      let text = "**完了したリマインダー履歴** 📜\n\n";
-      for (const reminder of completed) {
-        text += `✅ ${reminder.reminder_name}\n`;
+      let text = "━━━━━━━━━━━━━━\n";
+      text += "📜 完了したリマインダー履歴\n";
+      text += "━━━━━━━━━━━━━━\n\n";
+
+      completed.forEach((reminder, index) => {
+        text += `${index + 1}. ✅ ${reminder.reminder_name}\n`;
         text += `   完了: ${formatDateTime(new Date(reminder.updated_at))}\n\n`;
-      }
+      });
 
       return [{ type: "text", text }];
     } catch (error) {
@@ -481,14 +670,14 @@ async function processReminderCommand(
         return [
           {
             type: "text",
-            text: `「${reminderName}」のリマインダーを削除したよ🗑️`,
+            text: `【${reminderName}】のリマインダーを削除したよ🗑️`,
           },
         ];
       } else {
         return [
           {
             type: "text",
-            text: `「${reminderName}」のリマインダーが見つからなかった🤔\n「おしえてくん 一覧」で確認してみて！`,
+            text: `【${reminderName}】のリマインダーが見つからなかった🤔\n「おしえてくん 一覧」で確認してみて！`,
           },
         ];
       }
@@ -534,11 +723,14 @@ async function processReminderCommand(
         repeatPattern || undefined
       );
 
-      let confirmText = `リマインダーを設定したよ！⏰\n\n`;
-      confirmText += `**いつ**: ${formatDateTime(
+      let confirmText = "━━━━━━━━━━━━━━\n";
+      confirmText += "⏰ リマインダーを設定したよ！\n";
+      confirmText += "━━━━━━━━━━━━━━\n\n";
+      confirmText += `＜いつ＞\n  ${formatDateTime(
         parsed.date
-      )} (${getRelativeTime(parsed.date)})\n`;
-      confirmText += `**用件**: ${task}\n`;
+      )} (${getRelativeTime(parsed.date)})\n\n`;
+      confirmText += `＜用件＞\n  ${task}\n\n`;
+
       if (repeatPattern) {
         const repeatText =
           repeatPattern === "daily"
@@ -546,7 +738,7 @@ async function processReminderCommand(
             : repeatPattern === "weekly"
             ? "毎週"
             : "毎月";
-        confirmText += `**繰り返し**: ${repeatText} 🔄\n`;
+        confirmText += `＜繰り返し＞\n  ${repeatText} 🔄\n\n`;
       }
 
       // リスト名が含まれているかチェック
@@ -556,9 +748,9 @@ async function processReminderCommand(
       );
 
       if (matchedLists.length > 0) {
-        confirmText += `\n📝 リマインド時に以下のリストも表示するよ：\n`;
+        confirmText += `📝 リマインド時に以下のリストも表示するよ：\n`;
         matchedLists.forEach((list) => {
-          confirmText += `・**【${list.list_name}】**\n`;
+          confirmText += `  ・【${list.list_name}】\n`;
         });
       }
 
@@ -582,39 +774,155 @@ async function processReminderCommand(
   ];
 }
 
+// リマインダー詳細表示（ボタン付き）
+async function showReminderDetails(
+  roomId: string,
+  reminderName: string
+): Promise<any[]> {
+  try {
+    const reminder = await getReminderByName(roomId, reminderName);
+    if (!reminder) {
+      return [
+        {
+          type: "text",
+          text: `【${reminderName}】のリマインダーが見つからなかった🤔`,
+        },
+      ];
+    }
+
+    const priority =
+      reminder.priority === "high"
+        ? "🔴高"
+        : reminder.priority === "low"
+        ? "🟢低"
+        : "🟡中";
+    const repeat =
+      reminder.repeat_pattern === "daily"
+        ? "🔄毎日"
+        : reminder.repeat_pattern === "weekly"
+        ? "🔄毎週"
+        : reminder.repeat_pattern === "monthly"
+        ? "🔄毎月"
+        : "なし";
+
+    let text = "━━━━━━━━━━━━━━\n";
+    text += `⏰ リマインダー詳細\n`;
+    text += "━━━━━━━━━━━━━━\n\n";
+    text += `＜用件＞\n  ${reminder.message}\n\n`;
+    text += `＜日時＞\n  ${formatDateTime(
+      new Date(reminder.remind_at)
+    )}\n  (${getRelativeTime(new Date(reminder.remind_at))})\n\n`;
+    text += `＜優先度＞\n  ${priority}\n\n`;
+    text += `＜繰り返し＞\n  ${repeat}\n\n`;
+    text += "次のアクションを選んでね！";
+
+    const quickReply = {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "postback",
+            label: "🗑️ 削除",
+            data: `action=delete_reminder&reminder_name=${encodeURIComponent(
+              reminderName
+            )}`,
+            displayText: `おしえてくん ${reminderName} 削除`,
+          },
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📋 一覧に戻る",
+            text: "おしえてくん 一覧",
+          },
+        },
+      ],
+    };
+
+    return [
+      {
+        type: "text",
+        text: text,
+        quickReply: quickReply,
+      },
+    ];
+  } catch (error) {
+    console.error("Database error:", error);
+    return [
+      { type: "text", text: "リマインダーの取得でエラーが発生しちゃった😅" },
+    ];
+  }
+}
+
 // ヘルプ表示
 async function showHelp(): Promise<any[]> {
-  const helpText = `**📚 おぼえるくん & おしえてくん 使い方ガイド**
+  const helpText = `━━━━━━━━━━━━━━
+📚 おぼえるくん & おしえてくん
+   使い方ガイド
+━━━━━━━━━━━━━━
 
-**【おぼえるくん - リスト管理】** 📝
-- \`おぼえるくん [リスト名] 追加\` → アイテムを追加
-- \`おぼえるくん [リスト名]\` → リストの中身を表示
-- \`おぼえるくん [リスト名] [アイテム名] 削除\` → 1つのアイテムを削除
-- \`おぼえるくん [リスト名] 削除\` → リスト全体を削除
-- \`おぼえるくん 一覧\` → 全リスト一覧
-- \`おぼえるくん bye\` → 退室
+【おぼえるくん - リスト管理】📝
 
-**【おしえてくん - リマインダー】** ⏰
-- \`おしえてくん [日付] [時刻] [用件]\` → リマインダー登録
-- \`おしえてくん 一覧\` → リマインダー一覧
-- \`おしえてくん [リマインダー名] 削除\` → リマインダー削除
-- \`おしえてくん 履歴\` → 完了済みリマインダー
+＜基本操作＞
+  ・おぼえるくん [リスト名] 追加
+    → アイテムを追加
+  ・おぼえるくん [リスト名]
+    → リストの中身を表示
+  ・おぼえるくん [リスト名] [アイテム名] 削除
+    → 1つのアイテムを削除
+  ・おぼえるくん [リスト名] 削除
+    → リスト全体を削除
+  ・おぼえるくん 一覧
+    → 全リスト一覧（ボタンで選択可能）
+  ・おぼえるくん bye
+    → 退室
 
-**📅 日付の書き方**
-今日、明日、明後日、来週、3日後、12月25日、2025年12月25日
+━━━━━━━━━━━━━━
 
-**⏰ 時刻の書き方**
-朝(9時)、昼(12時)、夕方/夜(18時)、9時、15時30分、15:30
+【おしえてくん - リマインダー】⏰
 
-**🔄 繰り返し**
-毎日、毎週、毎月 を用件に含めると繰り返しリマインダーに
+＜基本操作＞
+  ・おしえてくん [日付] [時刻] [用件]
+    → リマインダー登録
+  ・おしえてくん 一覧
+    → リマインダー一覧（ボタンで選択可能）
+  ・おしえてくん [リマインダー名] 削除
+    → リマインダー削除
+  ・おしえてくん 履歴
+    → 完了済みリマインダー
 
-**💡 便利機能**
-- リマインド文にリスト名を含めると、そのリストも一緒に表示されるよ！
-- 例：「おしえてくん 明日 9時 買い物に行く」→ **【買い物】**リストも表示
-- リマインド通知にはスヌーズボタンが付くよ（10分/30分/1時間）
+＜日付の書き方＞
+  今日、明日、明後日、来週、3日後
+  12月25日、2025年12月25日
 
-困ったときはいつでも「使い方」って送ってね😊`;
+＜時刻の書き方＞
+  朝(9時)、昼(12時)、夕方/夜(18時)
+  9時、15時30分、15:30
+
+＜繰り返し＞
+  毎日、毎週、毎月
+  → 用件に含めると繰り返しリマインダーに
+
+━━━━━━━━━━━━━━
+
+💡 便利機能
+
+  ・リマインド文にリスト名を含めると
+    そのリストも一緒に表示されるよ！
+    
+    例：「おしえてくん 明日 9時 買い物に行く」
+    → 【買い物】リストも表示
+    
+  ・リマインド通知にはスヌーズボタンが
+    付くよ（10分/30分/1時間）
+    
+  ・一覧表示後はボタンで簡単操作！
+
+━━━━━━━━━━━━━━
+
+困ったときはいつでも
+「使い方」って送ってね😊`;
 
   return [{ type: "text", text: helpText }];
 }
