@@ -700,7 +700,16 @@ async function processReminderCommand(
       .replace(/毎日|毎週|毎月|まいにち|まいしゅう|まいつき/g, "")
       .trim();
 
+    console.log(`[REMINDER] Parsing: ${dateStr} ${timeStr}`);
     const parsed = parseDateTime(dateStr, timeStr);
+    console.log(`[REMINDER] Parsed result:`, {
+      success: parsed.success,
+      date_utc: parsed.date.toISOString(),
+      date_jst: new Date(
+        parsed.date.getTime() + 9 * 60 * 60 * 1000
+      ).toISOString(),
+      error: parsed.error,
+    });
 
     if (!parsed.success) {
       return [
@@ -715,13 +724,23 @@ async function processReminderCommand(
       // リマインダー名は用件の最初の20文字程度
       const reminderName = task.substring(0, 20);
 
-      await createReminder(
+      console.log(`[REMINDER] Creating reminder:`, {
+        roomId,
+        reminderName,
+        task,
+        remindAt: parsed.date.toISOString(),
+        repeatPattern,
+      });
+
+      const createdReminder = await createReminder(
         roomId,
         reminderName,
         task,
         parsed.date,
         repeatPattern || undefined
       );
+
+      console.log(`[REMINDER] Created reminder ID:`, createdReminder.id);
 
       let confirmText = "━━━━━━━━━━━━━━\n";
       confirmText += "⏰ リマインダーを設定したよ！\n";
@@ -730,6 +749,9 @@ async function processReminderCommand(
         parsed.date
       )} (${getRelativeTime(parsed.date)})\n\n`;
       confirmText += `＜用件＞\n  ${task}\n\n`;
+      confirmText += `＜デバッグ情報＞\n  リマインダーID: ${
+        createdReminder.id
+      }\n  保存日時(UTC): ${parsed.date.toISOString()}\n\n`;
 
       if (repeatPattern) {
         const repeatText =
@@ -756,11 +778,11 @@ async function processReminderCommand(
 
       return [{ type: "text", text: confirmText }];
     } catch (error) {
-      console.error("Database error:", error);
+      console.error("[REMINDER] Database error:", error);
       return [
         {
           type: "text",
-          text: "リマインダーの登録でエラーが発生しちゃった😅\nもう一度試してみて！",
+          text: `リマインダーの登録でエラーが発生しちゃった😅\nエラー: ${error}`,
         },
       ];
     }
