@@ -20,6 +20,53 @@ export function parseDateTime(
     const jstNow = new Date(now.getTime() + offsetDiff * 60 * 1000);
     let targetDate = new Date(jstNow);
 
+    // ========================================
+    // 1. 相対時間表現の解析（最優先）
+    // ========================================
+
+    // パターン1: "N時間後"
+    const hoursOnlyMatch = dateStr.match(/^(\d+)時間後$/);
+    if (hoursOnlyMatch) {
+      const hours = parseInt(hoursOnlyMatch[1]);
+      targetDate = new Date(jstNow.getTime() + hours * 60 * 60 * 1000);
+      const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+      return { date: utcDate, success: true };
+    }
+
+    // パターン2: "N分後"
+    const minutesOnlyMatch = dateStr.match(/^(\d+)分後$/);
+    if (minutesOnlyMatch) {
+      const minutes = parseInt(minutesOnlyMatch[1]);
+      targetDate = new Date(jstNow.getTime() + minutes * 60 * 1000);
+      const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+      return { date: utcDate, success: true };
+    }
+
+    // パターン3: "N時間N分後"
+    const hoursMinutesMatch = dateStr.match(/^(\d+)時間(\d+)分後$/);
+    if (hoursMinutesMatch) {
+      const hours = parseInt(hoursMinutesMatch[1]);
+      const minutes = parseInt(hoursMinutesMatch[2]);
+      targetDate = new Date(
+        jstNow.getTime() + (hours * 60 + minutes) * 60 * 1000
+      );
+      const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+      return { date: utcDate, success: true };
+    }
+
+    // パターン4: "N時間半後"
+    const hoursHalfMatch = dateStr.match(/^(\d+)時間半後$/);
+    if (hoursHalfMatch) {
+      const hours = parseInt(hoursHalfMatch[1]);
+      targetDate = new Date(jstNow.getTime() + (hours * 60 + 30) * 60 * 1000);
+      const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+      return { date: utcDate, success: true };
+    }
+
+    // ========================================
+    // 2. 通常の日付解析
+    // ========================================
+
     // 日付のパース
     if (dateStr === "今日" || dateStr === "きょう") {
       // 今日はそのまま
@@ -60,7 +107,10 @@ export function parseDateTime(
       targetDate = new Date(jstNow);
     }
 
-    // 時刻のパース
+    // ========================================
+    // 3. 時刻のパース
+    // ========================================
+
     let hour = 9;
     let minute = 0;
 
@@ -98,15 +148,22 @@ export function parseDateTime(
     targetDate.setHours(hour, minute, 0, 0);
 
     // JSTからUTCに変換してデータベースに保存
-    const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+    let utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
 
-    // 過去の日時の場合はエラー
+    // ========================================
+    // 4. 自動繰り上げ機能（過去時刻は翌日に）
+    // ========================================
+
     if (utcDate <= now) {
-      return {
-        date: utcDate,
-        success: false,
-        error: "過去の日時は設定できないよ！未来の日時を指定してね 📅",
-      };
+      // 過去の時刻の場合、翌日に自動繰り上げ
+      targetDate.setDate(targetDate.getDate() + 1);
+      utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+
+      console.log(
+        `[AUTO-FORWARD] 過去時刻を検出 → 翌日に繰り上げ: ${formatDateTime(
+          utcDate
+        )}`
+      );
     }
 
     return {
@@ -118,7 +175,7 @@ export function parseDateTime(
       date: new Date(),
       success: false,
       error:
-        "日時の形式がよくわからなかった😅\n例：「明日 9時」「12月25日 15時30分」「3日後 昼」",
+        "日時の形式がよくわからなかった😅\n例：「明日 9時」「12月25日 15時30分」「3日後 昼」「1時間後」「30分後」",
     };
   }
 }
