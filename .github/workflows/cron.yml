@@ -2,8 +2,8 @@ name: Reminder Cron Job
 
 on:
   schedule:
-    # 毎分実行（UTCタイム）
-    - cron: "* * * * *"
+    # 10分ごとに実行（UTCタイム）
+    - cron: "*/10 * * * *"
   workflow_dispatch: # 手動実行も可能
 
 jobs:
@@ -11,10 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel Cron Endpoint
-        # Note: CRON_SECRET must be configured in GitHub repository secrets
-        # Go to: Settings > Secrets and variables > Actions > New repository secret
-        # Name: CRON_SECRET, Value: czeo0MNtsWlg40HXQcori40uER2AsW10IW8FqIdgHIA=
         run: |
           curl -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            https://your-domain.vercel.app/api/cron
+            https://kiokkyu.vercel.app/api/cron

@@ -11,22 +11,33 @@ import { formatDateTime } from "@/lib/dateParser";
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!;
 
 export async function GET(req: NextRequest) {
-  // セキュリティ: cron secretで保護
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
+    // 現在時刻をログ出力
+    const now = new Date();
+    console.log(`[CRON] Checking reminders at: ${now.toISOString()} (UTC)`);
+    console.log(
+      `[CRON] JST: ${new Date(
+        now.getTime() + 9 * 60 * 60 * 1000
+      ).toISOString()}`
+    );
+
     const dueReminders = await getDueReminders();
-    console.log(`Found ${dueReminders.length} due reminders`);
+    console.log(`[CRON] Found ${dueReminders.length} due reminders`);
 
     for (const reminder of dueReminders) {
       try {
-        // リマインドメッセージを構築
-        let message = `⏰ **リマインダー**\n\n${reminder.message}`;
+        console.log(
+          `[CRON] Processing reminder ${reminder.id}: ${reminder.message}`
+        );
+        console.log(`[CRON] Remind at: ${reminder.remind_at} (UTC)`);
 
-        // 用件内にリスト名が含まれているかチェック
+        let message = `⏰ リマインダー\n\n${reminder.message}`;
+
         const lists = await getLists(reminder.room_id);
         const matchedLists = [];
 
@@ -46,36 +57,36 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // マッチしたリストを追加
         if (matchedLists.length > 0) {
-          message += "\n\n📝 **関連リスト**\n";
+          message += "\n\n📝 関連リスト\n";
           for (const list of matchedLists) {
-            message += `\n**【${list.list_name}】**\n`;
+            message += `\n【${list.list_name}】\n`;
             const items = list
-              .items!.map((item) => `・${item.item_text}`)
+              .items!.map((item) => `  ・${item.item_text}`)
               .join("\n");
             message += items + "\n";
           }
         }
 
-        // スヌーズボタン付きメッセージを送信
         await sendReminderWithSnooze(reminder.room_id, message, reminder.id);
 
-        // 繰り返しの場合は次回をスケジュール、そうでなければ完了
         await rescheduleRepeatingReminder(reminder);
 
-        console.log(`Sent reminder ${reminder.id} to ${reminder.room_id}`);
+        console.log(
+          `[CRON] Successfully sent reminder ${reminder.id} to ${reminder.room_id}`
+        );
       } catch (error) {
-        console.error(`Failed to send reminder ${reminder.id}:`, error);
+        console.error(`[CRON] Failed to send reminder ${reminder.id}:`, error);
       }
     }
 
     return NextResponse.json({
       success: true,
       processed: dueReminders.length,
+      timestamp: now.toISOString(),
     });
   } catch (error) {
-    console.error("Cron job error:", error);
+    console.error("[CRON] Cron job error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -83,7 +94,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// スヌーズボタン付きでリマインダーを送信
 async function sendReminderWithSnooze(
   roomId: string,
   message: string,

@@ -6,6 +6,7 @@ const pool = new Pool({
     process.env.NODE_ENV === "production"
       ? { rejectUnauthorized: false }
       : false,
+  options: "-c timezone=UTC",
 });
 
 // ========== リスト関連の型定義 ==========

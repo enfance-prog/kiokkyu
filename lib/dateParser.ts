@@ -10,45 +10,46 @@ export function parseDateTime(
   timeStr?: string
 ): ParsedDateTime {
   try {
+    // 日本時間（JST）を基準にする
     const now = new Date();
-    let targetDate = new Date(now);
+    const jstOffset = 9 * 60; // JST is UTC+9
+    const localOffset = now.getTimezoneOffset(); // ローカルとUTCの差（分）
+    const offsetDiff = jstOffset + localOffset; // JSTとローカルの差
+
+    // JST基準の現在時刻を取得
+    const jstNow = new Date(now.getTime() + offsetDiff * 60 * 1000);
+    let targetDate = new Date(jstNow);
 
     // 日付のパース
     if (dateStr === "今日" || dateStr === "きょう") {
       // 今日はそのまま
     } else if (dateStr === "明日" || dateStr === "あした") {
-      targetDate.setDate(now.getDate() + 1);
+      targetDate.setDate(jstNow.getDate() + 1);
     } else if (dateStr === "明後日" || dateStr === "あさって") {
-      targetDate.setDate(now.getDate() + 2);
+      targetDate.setDate(jstNow.getDate() + 2);
     } else if (dateStr === "来週" || dateStr === "らいしゅう") {
-      targetDate.setDate(now.getDate() + 7);
+      targetDate.setDate(jstNow.getDate() + 7);
     } else if (dateStr === "再来週" || dateStr === "さらいしゅう") {
-      targetDate.setDate(now.getDate() + 14);
+      targetDate.setDate(jstNow.getDate() + 14);
     } else if (/^(\d+)日後$/.test(dateStr)) {
-      // "3日後" のような形式
       const days = parseInt(dateStr.match(/^(\d+)日後$/)![1]);
-      targetDate.setDate(now.getDate() + days);
+      targetDate.setDate(jstNow.getDate() + days);
     } else if (/^(\d+)日$/.test(dateStr)) {
-      // "15日" のような形式
       const day = parseInt(dateStr.match(/^(\d+)日$/)![1]);
       targetDate.setDate(day);
-      // 過去の日付になる場合は来月にする
-      if (targetDate < now) {
+      if (targetDate < jstNow) {
         targetDate.setMonth(targetDate.getMonth() + 1);
       }
     } else if (/^(\d+)月(\d+)日$/.test(dateStr)) {
-      // "12月25日" のような形式
       const match = dateStr.match(/^(\d+)月(\d+)日$/)!;
       const month = parseInt(match[1]) - 1;
       const day = parseInt(match[2]);
       targetDate.setMonth(month);
       targetDate.setDate(day);
-      // 過去の日付になる場合は来年にする
-      if (targetDate < now) {
+      if (targetDate < jstNow) {
         targetDate.setFullYear(targetDate.getFullYear() + 1);
       }
     } else if (/^(\d{4})年(\d+)月(\d+)日$/.test(dateStr)) {
-      // "2025年12月25日" のような形式
       const match = dateStr.match(/^(\d{4})年(\d+)月(\d+)日$/)!;
       const year = parseInt(match[1]);
       const month = parseInt(match[2]) - 1;
@@ -56,11 +57,11 @@ export function parseDateTime(
       targetDate = new Date(year, month, day);
     } else {
       // デフォルトは今日
-      targetDate = new Date(now);
+      targetDate = new Date(jstNow);
     }
 
     // 時刻のパース
-    let hour = 9; // デフォルトは朝9時
+    let hour = 9;
     let minute = 0;
 
     if (timeStr) {
@@ -82,15 +83,12 @@ export function parseDateTime(
       } else if (timeStr === "深夜" || timeStr === "しんや") {
         hour = 22;
       } else if (/^(\d+)時$/.test(timeStr)) {
-        // "15時" のような形式
         hour = parseInt(timeStr.match(/^(\d+)時$/)![1]);
       } else if (/^(\d+)時(\d+)分$/.test(timeStr)) {
-        // "15時30分" のような形式
         const match = timeStr.match(/^(\d+)時(\d+)分$/)!;
         hour = parseInt(match[1]);
         minute = parseInt(match[2]);
       } else if (/^(\d+):(\d+)$/.test(timeStr)) {
-        // "15:30" のような形式
         const match = timeStr.match(/^(\d+):(\d+)$/)!;
         hour = parseInt(match[1]);
         minute = parseInt(match[2]);
@@ -99,17 +97,20 @@ export function parseDateTime(
 
     targetDate.setHours(hour, minute, 0, 0);
 
+    // JSTからUTCに変換してデータベースに保存
+    const utcDate = new Date(targetDate.getTime() - offsetDiff * 60 * 1000);
+
     // 過去の日時の場合はエラー
-    if (targetDate <= now) {
+    if (utcDate <= now) {
       return {
-        date: targetDate,
+        date: utcDate,
         success: false,
         error: "過去の日時は設定できないよ！未来の日時を指定してね 📅",
       };
     }
 
     return {
-      date: targetDate,
+      date: utcDate,
       success: true,
     };
   } catch (error) {
@@ -122,7 +123,6 @@ export function parseDateTime(
   }
 }
 
-// 繰り返しパターンのパース
 export function parseRepeatPattern(text: string): string | null {
   if (text.includes("毎日") || text.includes("まいにち")) {
     return "daily";
@@ -134,16 +134,18 @@ export function parseRepeatPattern(text: string): string | null {
   return null;
 }
 
-// 日時を人間が読みやすい形式にフォーマット
+// 日時を人間が読みやすい形式にフォーマット（JST表示）
 export function formatDateTime(date: Date): string {
-  const now = new Date();
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hour = date.getHours();
-  const minute = date.getMinutes();
+  // UTCからJSTに変換
+  const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
 
-  // 今年の場合は年を省略
+  const now = new Date();
+  const year = jstDate.getUTCFullYear();
+  const month = jstDate.getUTCMonth() + 1;
+  const day = jstDate.getUTCDate();
+  const hour = jstDate.getUTCHours();
+  const minute = jstDate.getUTCMinutes();
+
   const yearStr = year === now.getFullYear() ? "" : `${year}年`;
   const minuteStr = minute === 0 ? "" : `${minute}分`;
 
