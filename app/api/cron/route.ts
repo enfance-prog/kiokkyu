@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
         }
 
         if (matchedLists.length > 0) {
-          message += "\n\n📝 関連リスト\n";
+          message += "\n\n📋 関連リスト\n";
           for (const list of matchedLists) {
             message += `\n【${list.list_name}】\n`;
             const items = list
@@ -108,16 +108,11 @@ async function sendReminderWithSnooze(
       },
       {
         type: "template",
-        altText: "スヌーズしますか？",
+        altText: "スヌーズしますか?",
         template: {
           type: "buttons",
-          text: "このリマインダーをスヌーズしますか？",
+          text: "このリマインダーをスヌーズしますか?",
           actions: [
-            {
-              type: "postback",
-              label: "⏰ 10分後",
-              data: `action=snooze&reminder_id=${reminderId}&minutes=10`,
-            },
             {
               type: "postback",
               label: "⏰ 30分後",
@@ -127,6 +122,11 @@ async function sendReminderWithSnooze(
               type: "postback",
               label: "⏰ 1時間後",
               data: `action=snooze&reminder_id=${reminderId}&minutes=60`,
+            },
+            {
+              type: "postback",
+              label: "⏰ 3時間後",
+              data: `action=snooze&reminder_id=${reminderId}&minutes=180`,
             },
             {
               type: "postback",
