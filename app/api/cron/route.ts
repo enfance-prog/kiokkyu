@@ -70,8 +70,10 @@ export async function GET(req: NextRequest) {
 
         await sendReminderWithSnooze(reminder.room_id, message, reminder.id);
 
-        await rescheduleRepeatingReminder(reminder);
-
+        // 繰り返しパターンがある場合のみ次回をスケジュール
+        if (reminder.repeat_pattern) {
+          await rescheduleRepeatingReminder(reminder);
+        }
         console.log(
           `[CRON] Successfully sent reminder ${reminder.id} to ${reminder.room_id}`
         );
